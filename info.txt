@@ -1,0 +1,57 @@
+================================================================================
+         YD-ESP32-S3 SINGLE MG996R SERVO CONTROLLER HARDWARE PINOUT
+================================================================================
+
+1. MG996R HIGH-TORQUE SERVO MOTOR WIRING:
+--------------------------------------------------------------------------------
+Servo Lead      Wire Color      Connection Pin      Notes
+Signal (PWM)    Orange / White  GPIO 1              50Hz LEDC PWM (500us - 2500us)
+Power (VCC)     Red             External 5V - 6V    *MUST* use external 5V/6V supply!
+                                                    MG996R stall current can reach 2.5A.
+                                                    DO NOT power directly from ESP32 3.3V pin.
+Ground (GND)    Brown / Black   GND                 Common Ground (Tie PSU GND to ESP32 GND)
+
+
+2. PS2 DUAL-AXIS ANALOG JOYSTICK & PUSH BUTTON WIRING:
+--------------------------------------------------------------------------------
+Joystick Pin    YD-ESP32-S3 Pin     Function
+GND             GND                 Common Ground
++5V             3.3V (or 5V)        VCC Power Rail
+VRx             GPIO 2 (ADC1_CH1)   Smooth Slew Control (deflect to sweep 0-180 deg)
+VRy             GPIO 3 (ADC1_CH2)   Auxiliary Fine Adjust (deflect for micro-steps)
+SW              GPIO 4 (Pull-Up)    Push Button Click: Toggles Home (90 deg) / Min (0 deg) / Max (180 deg)
+
+CONTROL BEHAVIOR:
+- Deflecting VRx smoothly slews the MG996R servo between 0 deg and 180 deg.
+- Releasing the stick to deadzone holds the current angle without end-stop buzzing.
+- Clicking the joystick SW push button steps through preset poses (0 deg -> 90 deg -> 180 deg).
+
+
+3. BLUETOOTH LOW ENERGY (BLE) SPECIFICATION:
+--------------------------------------------------------------------------------
+Device Advertised Name:     ESP32S3-Arm
+GATT Service (NUS):         6e400001-b5a3-f393-e0a9-e50e24dcca9e
+RX Characteristic (Write):  6e400002-b5a3-f393-e0a9-e50e24dcca9e
+TX Characteristic (Notify): 6e400003-b5a3-f393-e0a9-e50e24dcca9e
+
+
+4. SERIAL REPL & BLE COMMAND REFERENCE:
+--------------------------------------------------------------------------------
+- s1 <0-180> / servo <0-180> : Set MG996R angle immediately
+- move <0-180> [duration_ms] : Smooth ease to target angle over duration (e.g. move 180 600)
+- home                       : Smoothly move to center (90 deg)
+- min / max                  : Move to 0 deg or 180 deg
+- nudge <+/-deg>             : Incremental step (e.g. nudge +5, nudge -10)
+- detach / idle              : Cut PWM duty to 0% (relaxes holding torque, eliminates buzzing)
+- attach                     : Re-engage PWM holding torque
+- autoidle <on|off>          : Automatically relax PWM duty 3s after motion completes
+- offset <-45..45>           : Real-time trim calibration offset
+- cal_set <offset>           : Save trim calibration offset to NVS Flash
+- cal_get                    : Read current trim calibration offset
+- jspeed [30-500]            : Set joystick slew rate in deg/s (default 260)
+- jinvert [on|off]           : Invert joystick direction
+- action_run <1-8>           : Execute programmed sequence slot once
+- action_loop <1-8>          : Continuously loop programmed sequence slot
+- stop                       : Stop sequence or smooth move immediately
+- status                     : Query live angle, offset, power, and run state
+================================================================================
