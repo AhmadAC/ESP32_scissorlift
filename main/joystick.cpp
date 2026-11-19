@@ -122,9 +122,11 @@ static void joystick_poll_task(void *pvParameters) {
 
     float center_x = accum_x / (float)CAL_SAMPLES;
     float filt_x = center_x;
+    bool analog_present = (center_x >= 400.0f && center_x <= 3700.0f);
 
-    ESP_LOGI(TAG, "PS2 Joystick calibrated center: %.1f, Speed: %d deg/s, Invert: %d",
-             center_x, s_slew_deg_per_sec, s_invert_axis ? 1 : 0);
+    ESP_LOGI(TAG, "PS2 Joystick calibrated center: %.1f (analog=%s), Speed: %d deg/s, Invert: %d",
+             center_x, analog_present ? "active" : "unplugged",
+             s_slew_deg_per_sec, s_invert_axis ? 1 : 0);
 
     float servo_f = (float)servo_get_angle();
 
@@ -177,8 +179,8 @@ static void joystick_poll_task(void *pvParameters) {
             }
         }
 
-        // 3. Process Analog Motion
-        if (mag > DEADZONE_NORM) {
+        // 3. Process Analog Motion only when an analog joystick is detected
+        if (analog_present && mag > DEADZONE_NORM) {
             float eff_x = (mag - DEADZONE_NORM) / (1.0f - DEADZONE_NORM);
             if (nx < 0.0f) eff_x = -eff_x;
 
@@ -191,7 +193,6 @@ static void joystick_poll_task(void *pvParameters) {
             servo_set_angle((int)lroundf(servo_f));
             pending_notify = true;
         } else {
-            // Keep tracking float angle aligned when joystick is centered
             servo_f = (float)servo_get_angle();
         }
 
@@ -236,6 +237,10 @@ void joystick_init(void) {
     };
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_VRX_CHANNEL, &config));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_VRY_CHANNEL, &config));
+
+    // Keep unconnected ADC pins pulled down so floating noise never triggers phantom motion
+    gpio_pulldown_en(JOYSTICK_ADC_VRX_PIN);
+    gpio_pulldown_en(JOYSTICK_ADC_VRY_PIN);
 
     gpio_config_t btn_cfg = {};
     btn_cfg.mode = GPIO_MODE_INPUT;

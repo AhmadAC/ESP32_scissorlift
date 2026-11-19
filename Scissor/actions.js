@@ -85,7 +85,6 @@ function stringToSteps(str) {
     .filter(Boolean)
     .map(tok => {
       const p = tok.split(",").map(n => parseInt(n.trim(), 10));
-      // Supports both 3-param (s1, move, wait) and legacy 5-param (s1, s2, s3, move, wait)
       if (p.length >= 5) {
         return {
           s1: clampAngle(isNaN(p[0]) ? 90 : p[0]),
@@ -227,9 +226,9 @@ function renderEditorSteps() {
         <span style="font-size:10px; font-weight:700; color:#38bdf8;">Step ${idx + 1}</span>
         <div style="display:flex; gap:6px;">
           <button type="button" onclick="previewStep(${idx})" style="background:#0284c7; color:white; border:none; border-radius:4px; padding:2px 7px; font-size:9.5px; font-weight:700; cursor:pointer;">Preview</button>
-          <button type="button" onclick="moveStep(${idx}, -1)" style="background:#334155; color:white; border:none; border-radius:4px; padding:2px 6px; font-size:9.5px; cursor:pointer;">↑</button>
-          <button type="button" onclick="moveStep(${idx}, 1)" style="background:#334155; color:white; border:none; border-radius:4px; padding:2px 6px; font-size:9.5px; cursor:pointer;">↓</button>
-          <button type="button" onclick="deleteStep(${idx})" style="background:#ef4444; color:white; border:none; border-radius:4px; padding:2px 6px; font-size:9.5px; font-weight:700; cursor:pointer;">✕</button>
+          <button type="button" onclick="moveStep(${idx}, -1)" style="background:#334155; color:white; border:none; border-radius:4px; padding:2px 6px; font-size:9.5px; cursor:pointer; display:inline-flex; align-items:center;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"></line><polyline points="5 12 12 5 19 12"></polyline></svg></button>
+          <button type="button" onclick="moveStep(${idx}, 1)" style="background:#334155; color:white; border:none; border-radius:4px; padding:2px 6px; font-size:9.5px; cursor:pointer; display:inline-flex; align-items:center;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg></button>
+          <button type="button" onclick="deleteStep(${idx})" style="background:#ef4444; color:white; border:none; border-radius:4px; padding:2px 6px; font-size:9.5px; font-weight:700; cursor:pointer; display:inline-flex; align-items:center;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button>
         </div>
       </div>
       <div class="step-inputs" style="grid-template-columns: repeat(3, 1fr);">
@@ -398,4 +397,3 @@ function updateActionRunBadge(running, slot, loop) {
   }
   renderActionsGrid();
 }
-
