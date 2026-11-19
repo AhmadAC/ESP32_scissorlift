@@ -185,7 +185,7 @@ function queueThrottledAngle(angle) {
       const cmd = pendingServoCmd;
       pendingServoCmd = null;
       if (cmd) sendCommand(cmd);
-    }, 80);
+    }, 70);
   }
 }
 
@@ -264,7 +264,7 @@ function setMinTrimAngle(target, throttled) {
   }
   draftMinAngle = next;
   servoAngle = next;
-  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  liftPercent = 0;
   servoEnabled = true;
   updateServoUI();
 
@@ -295,7 +295,7 @@ function setMaxTrimAngle(target, throttled) {
   }
   draftMaxAngle = next;
   servoAngle = next;
-  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  liftPercent = 100;
   servoEnabled = true;
   updateServoUI();
 
@@ -311,7 +311,7 @@ function testTrimEnd(which) {
   lastSliderEditMs = Date.now();
   const target = (which === "min") ? draftMinAngle : draftMaxAngle;
   servoAngle = target;
-  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  liftPercent = (which === "min") ? 0 : 100;
   servoEnabled = true;
   updateServoUI();
   sendCommand(`move ${target} 350`);
@@ -434,7 +434,6 @@ function applyReceivedRange(minA, maxA) {
 
 function applyReceivedOffset(offset) {
   if (isNaN(offset)) return;
-  // Kept for compatibility with CAL:<offset> telemetry
 }
 
 function applyReceivedEnableState(enabled) {

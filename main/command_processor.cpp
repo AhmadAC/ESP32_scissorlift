@@ -1,4 +1,3 @@
-
 #include "command_processor.h"
 #include "servo_controller.h"
 #include "joystick.h"
@@ -66,7 +65,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         if (angle >= SERVO_MIN_ANGLE && angle <= SERVO_MAX_ANGLE) {
             servo_set_angle(angle);
             char msg[32];
-            snprintf(msg, sizeof(msg), "ANG:%d\n", angle);
+            snprintf(msg, sizeof(msg), "ANG:%d\n", servo_get_angle());
             print_fn(msg);
         } else {
             print_fn(">> Error: Angle must be 0-180 deg.\n");
@@ -80,7 +79,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         if (angle >= SERVO_MIN_ANGLE && angle <= SERVO_MAX_ANGLE) {
             servo_set_angle(angle);
             char msg[32];
-            snprintf(msg, sizeof(msg), "ANG:%d\n", angle);
+            snprintf(msg, sizeof(msg), "ANG:%d\n", servo_get_angle());
             print_fn(msg);
             return;
         }
@@ -105,11 +104,9 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
     if (strncmp(p, "nudge ", 6) == 0) {
         int delta = atoi(p + 6);
         int target = servo_get_angle() + delta;
-        if (target < SERVO_MIN_ANGLE) target = SERVO_MIN_ANGLE;
-        if (target > SERVO_MAX_ANGLE) target = SERVO_MAX_ANGLE;
         servo_set_angle(target);
         char msg[32];
-        snprintf(msg, sizeof(msg), "ANG:%d\n", target);
+        snprintf(msg, sizeof(msg), "ANG:%d\n", servo_get_angle());
         print_fn(msg);
         return;
     }
@@ -144,17 +141,19 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         return;
     }
 
-    // Stop motion
+    // Stop motion immediately
     if (strcmp(p, "stop") == 0) {
         servo_stop_motion();
         print_fn(">> Motion stopped.\n");
+        command_notify_status();
         return;
     }
 
-    // Detach / Idle (cuts PWM to 0%)
+    // Detach / Idle (duty=0, relaxes holding torque without LEDC driver halt)
     if (strcmp(p, "detach") == 0 || strcmp(p, "idle") == 0 || strcmp(p, "disable") == 0) {
         servo_detach();
         print_fn(">> Servo detached (idle, PWM=0).\n");
+        command_notify_status();
         return;
     }
 
@@ -162,6 +161,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
     if (strcmp(p, "attach") == 0 || strcmp(p, "enable") == 0) {
         servo_attach();
         print_fn(">> Servo attached (PWM enabled).\n");
+        command_notify_status();
         return;
     }
 
@@ -172,6 +172,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         char msg[32];
         snprintf(msg, sizeof(msg), "AUTO_IDLE:%d\n", en ? 1 : 0);
         print_fn(msg);
+        command_notify_status();
         return;
     }
 
@@ -234,7 +235,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         return;
     }
 
-    // Live Trim Offset: "offset <-45..45>" or "offset s1 <-45..45>"
+    // Live Trim Offset: "offset <-45..45>"
     if (strncmp(p, "offset ", 7) == 0) {
         const char *arg = p + 7;
         if (strncmp(arg, "s1 ", 3) == 0) arg += 3;
@@ -267,7 +268,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         return;
     }
 
-    // Run programmable action slot: "action_run <1-8>" or "run <1-8>"
+    // Run programmable action slot: "action_run <1-8>"
     if (strncmp(p, "action_run ", 11) == 0 || strncmp(p, "run ", 4) == 0) {
         int slot = atoi(strncmp(p, "run ", 4) == 0 ? (p + 4) : (p + 11));
         if (servo_action_run(slot, false)) {
@@ -280,7 +281,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         return;
     }
 
-    // Loop programmable action slot: "action_loop <1-8>" or "loop <1-8>"
+    // Loop programmable action slot: "action_loop <1-8>"
     if (strncmp(p, "action_loop ", 12) == 0 || strncmp(p, "loop ", 5) == 0) {
         int slot = atoi(strncmp(p, "loop ", 5) == 0 ? (p + 5) : (p + 12));
         if (servo_action_run(slot, true)) {
@@ -364,7 +365,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
 
     if (strcmp(p, "help") == 0 || strcmp(p, "?") == 0) {
         print_fn("Single MG996R Servo on GPIO 1 Commands:\n"
-                 "  s1 <0-180> / servo <0-180>           : Move servo to angle immediately\n"
+                 "  s1 <0-180> / servo <0-180>           : Move servo immediately\n"
                  "  move <0-180> [duration_ms]           : Smooth ease over duration\n"
                  "  nudge <+/-deg>                       : Adjust angle by delta\n"
                  "  home / min / max                     : Preset angles (saved range)\n"
@@ -375,6 +376,7 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
                  "  jspeed [30-500]                      : Get/Set joystick speed (deg/s)\n"
                  "  jinvert [on|off]                     : Toggle joystick direction\n"
                  "  action_run <1-8> / action_loop <1-8> : Run or loop saved sequence\n"
+                 "  stop                                 : Immediately cancel active motion\n"
                  "  status                               : Print full servo telemetry\n");
         return;
     }

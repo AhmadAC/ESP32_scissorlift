@@ -1,4 +1,3 @@
-
 const DEFAULT_ACTIONS = {
   1: { name: "Center 90°", steps: [{ s1: 90, move: 500, wait: 0 }] },
   2: { name: "Min 0°",     steps: [{ s1: 0, move: 500, wait: 0 }] },

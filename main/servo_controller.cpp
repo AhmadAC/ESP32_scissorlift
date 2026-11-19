@@ -1,4 +1,3 @@
-
 #include "servo_controller.h"
 #include "ble_server.h"
 #include "driver/ledc.h"
@@ -54,17 +53,35 @@ static int64_t s_last_activity_us = 0;
 static char s_action_slots[ACTION_NUM_SLOTS][ACTION_MAX_LEN];
 
 static TaskHandle_t s_seq_task_handle = NULL;
+static TaskHandle_t s_smooth_task_handle = NULL;
 static volatile bool s_seq_running = false;
 static volatile bool s_seq_looping = false;
 static volatile int  s_seq_active_slot = 0;
 static volatile bool s_seq_stop_req = false;
+static volatile bool s_move_stop_req = false;
 
 static servo_step_t s_active_steps[ACTION_MAX_STEPS];
 static size_t       s_active_step_count = 0;
 
-static int clamp_angle(int angle) {
+typedef struct {
+    int target_angle;
+    int duration_ms;
+} smooth_move_req_t;
+
+static int clamp_to_hardware_limits(int angle) {
     if (angle < SERVO_MIN_ANGLE) return SERVO_MIN_ANGLE;
     if (angle > SERVO_MAX_ANGLE) return SERVO_MAX_ANGLE;
+    return angle;
+}
+
+static int clamp_to_trimmed_range(int angle) {
+    portENTER_CRITICAL(&s_servo_mux);
+    int mn = s_min_angle;
+    int mx = s_max_angle;
+    portEXIT_CRITICAL(&s_servo_mux);
+
+    if (angle < mn) return mn;
+    if (angle > mx) return mx;
     return angle;
 }
 
@@ -75,7 +92,8 @@ static int clamp_offset(int offset) {
 }
 
 static uint32_t calc_duty(int angle, int offset) {
-    int eff = clamp_angle(angle + offset);
+    int eff = clamp_to_trimmed_range(angle + offset);
+    eff = clamp_to_hardware_limits(eff);
     uint32_t pulse_us = SERVO_MIN_US + ((uint32_t)eff * (SERVO_MAX_US - SERVO_MIN_US)) / 180;
     if (pulse_us < SERVO_MIN_US) pulse_us = SERVO_MIN_US;
     if (pulse_us > SERVO_MAX_US) pulse_us = SERVO_MAX_US;
@@ -88,7 +106,8 @@ static void apply_hardware_pwm(int angle, int offset, bool enable) {
         ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, duty);
         ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
     } else {
-        ledc_stop(LEDC_MODE, LEDC_CHANNEL, 0);
+        ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, 0);
+        ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
     }
 }
 
@@ -169,7 +188,7 @@ static size_t parse_sequence_steps(const char *steps_str, servo_step_t *out_step
                 if (matched >= 2) move = v2;
                 if (matched >= 3) wait = v3;
             }
-            out_steps[count].angle = clamp_angle(angle);
+            out_steps[count].angle = clamp_to_trimmed_range(angle);
             out_steps[count].move_ms = (move < 20) ? 20 : (move > 10000 ? 10000 : move);
             out_steps[count].wait_ms = (wait > 0) ? (wait > 30000 ? 30000 : wait) : 0;
             count++;
@@ -184,7 +203,7 @@ static size_t parse_sequence_steps(const char *steps_str, servo_step_t *out_step
 }
 
 static void interpolate_move(int target_angle, int duration_ms) {
-    target_angle = clamp_angle(target_angle);
+    target_angle = clamp_to_trimmed_range(target_angle);
 
     int start_angle = 90;
     int off = 0;
@@ -218,7 +237,7 @@ static void interpolate_move(int target_angle, int duration_ms) {
     if (total_steps < 1) total_steps = 1;
 
     for (int step = 1; step <= total_steps; step++) {
-        if (s_seq_stop_req) break;
+        if (s_move_stop_req || s_seq_stop_req) break;
 
         float t = (float)step / (float)total_steps;
         float ease = 0.5f * (1.0f - cosf(t * 3.14159265f));
@@ -234,7 +253,7 @@ static void interpolate_move(int target_angle, int duration_ms) {
         vTaskDelay(pdMS_TO_TICKS(step_interval_ms));
     }
 
-    if (!s_seq_stop_req) {
+    if (!s_move_stop_req && !s_seq_stop_req) {
         portENTER_CRITICAL(&s_servo_mux);
         s_angle = target_angle;
         s_last_activity_us = esp_timer_get_time();
@@ -246,28 +265,41 @@ static void interpolate_move(int target_angle, int duration_ms) {
     }
 }
 
+static void smooth_move_task(void *pvParameters) {
+    smooth_move_req_t *req = (smooth_move_req_t *)pvParameters;
+    int target = req->target_angle;
+    int dur = req->duration_ms;
+    free(req);
+
+    s_move_stop_req = false;
+    interpolate_move(target, dur);
+
+    s_smooth_task_handle = NULL;
+    vTaskDelete(NULL);
+}
+
 static void sequence_runner_task(void *pvParameters) {
     (void)pvParameters;
 
     do {
         for (size_t i = 0; i < s_active_step_count; i++) {
-            if (s_seq_stop_req) break;
+            if (s_seq_stop_req || s_move_stop_req) break;
 
             servo_step_t step = s_active_steps[i];
             interpolate_move(step.angle, step.move_ms);
 
-            if (s_seq_stop_req) break;
+            if (s_seq_stop_req || s_move_stop_req) break;
 
             if (step.wait_ms > 0) {
                 int waited = 0;
-                while (waited < step.wait_ms && !s_seq_stop_req) {
+                while (waited < step.wait_ms && !s_seq_stop_req && !s_move_stop_req) {
                     int chunk = (step.wait_ms - waited > 20) ? 20 : (step.wait_ms - waited);
                     vTaskDelay(pdMS_TO_TICKS(chunk));
                     waited += chunk;
                 }
             }
         }
-    } while (s_seq_looping && !s_seq_stop_req);
+    } while (s_seq_looping && !s_seq_stop_req && !s_move_stop_req);
 
     s_seq_running = false;
     s_seq_looping = false;
@@ -288,7 +320,7 @@ static void auto_idle_monitor_task(void *pvParameters) {
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(250));
 
-        if (!s_auto_idle || s_seq_running) continue;
+        if (!s_auto_idle || s_seq_running || (s_smooth_task_handle != NULL)) continue;
 
         int64_t now_us = esp_timer_get_time();
         bool enabled = false;
@@ -301,7 +333,7 @@ static void auto_idle_monitor_task(void *pvParameters) {
 
         if (enabled && (now_us - last_us > AUTO_IDLE_TIMEOUT_US)) {
             servo_detach();
-            ESP_LOGI(TAG, "Auto-idle triggered: MG996R detached to prevent heat and stall buzz.");
+            ESP_LOGI(TAG, "Auto-idle triggered: MG996R relaxed PWM to prevent heat and buzzing.");
         }
     }
 }
@@ -326,17 +358,19 @@ void servo_controller_init(void) {
     ledc_ch.timer_sel  = LEDC_TIMER;
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_ch));
 
-    ledc_stop(LEDC_MODE, LEDC_CHANNEL, 0);
+    ledc_set_duty(LEDC_MODE, LEDC_CHANNEL, 0);
+    ledc_update_duty(LEDC_MODE, LEDC_CHANNEL);
 
     s_last_activity_us = esp_timer_get_time();
 
     xTaskCreatePinnedToCore(auto_idle_monitor_task, "auto_idle_task", 2048, NULL, 2, NULL, 1);
-    ESP_LOGI(TAG, "MG996R Servo initialized on GPIO %d (range=%d..%d, starts DETACHED).",
+    ESP_LOGI(TAG, "MG996R Servo initialized on GPIO %d (range=%d..%d, starts detached duty=0).",
              (int)SERVO_1_PIN, s_min_angle, s_max_angle);
 }
 
 void servo_set_angle(int angle) {
-    angle = clamp_angle(angle);
+    servo_stop_motion();
+    angle = clamp_to_trimmed_range(angle);
 
     int off = 0;
     bool was_enabled = false;
@@ -362,7 +396,18 @@ void servo_set_angle_idx(int idx, int angle) {
 
 void servo_move_smooth(int angle, int duration_ms) {
     servo_stop_motion();
-    interpolate_move(angle, duration_ms);
+    angle = clamp_to_trimmed_range(angle);
+
+    smooth_move_req_t *req = (smooth_move_req_t *)malloc(sizeof(smooth_move_req_t));
+    if (!req) {
+        servo_set_angle(angle);
+        return;
+    }
+    req->target_angle = angle;
+    req->duration_ms = duration_ms;
+
+    s_move_stop_req = false;
+    xTaskCreatePinnedToCore(smooth_move_task, "smooth_task", 3072, req, 5, &s_smooth_task_handle, 1);
 }
 
 int servo_get_angle(void) {
@@ -378,12 +423,17 @@ int servo_get_angle_idx(int idx) {
 }
 
 void servo_stop_motion(void) {
-    if (s_seq_running) {
-        s_seq_stop_req = true;
-        for (int i = 0; i < 25 && s_seq_running; i++) {
+    s_move_stop_req = true;
+    s_seq_stop_req = true;
+
+    if (s_seq_running || (s_smooth_task_handle != NULL)) {
+        for (int i = 0; i < 20 && (s_seq_running || (s_smooth_task_handle != NULL)); i++) {
             vTaskDelay(pdMS_TO_TICKS(15));
         }
     }
+
+    s_move_stop_req = false;
+    s_seq_stop_req = false;
 }
 
 void servo_detach(void) {
@@ -492,8 +542,8 @@ void servo_save_offset(int offset) {
 }
 
 void servo_set_range(int min_angle, int max_angle) {
-    min_angle = clamp_angle(min_angle);
-    max_angle = clamp_angle(max_angle);
+    min_angle = clamp_to_hardware_limits(min_angle);
+    max_angle = clamp_to_hardware_limits(max_angle);
     if (min_angle >= max_angle) {
         if (min_angle >= SERVO_MAX_ANGLE) min_angle = SERVO_MAX_ANGLE - 1;
         max_angle = min_angle + 1;
@@ -502,6 +552,8 @@ void servo_set_range(int min_angle, int max_angle) {
     portENTER_CRITICAL(&s_servo_mux);
     s_min_angle = min_angle;
     s_max_angle = max_angle;
+    if (s_angle < s_min_angle) s_angle = s_min_angle;
+    if (s_angle > s_max_angle) s_angle = s_max_angle;
     portEXIT_CRITICAL(&s_servo_mux);
 
     nvs_handle_t h;
@@ -578,6 +630,7 @@ bool servo_action_run(int slot, bool loop) {
     s_seq_looping = loop;
     s_seq_active_slot = slot;
     s_seq_stop_req = false;
+    s_move_stop_req = false;
 
     notify_action_state(true, slot, loop);
     xTaskCreatePinnedToCore(sequence_runner_task, "seq_run_task", 4096, NULL, 5, &s_seq_task_handle, 1);
@@ -596,6 +649,7 @@ bool servo_run_sequence_str(const char *steps_str, bool loop) {
     s_seq_looping = loop;
     s_seq_active_slot = 0;
     s_seq_stop_req = false;
+    s_move_stop_req = false;
 
     notify_action_state(true, 0, loop);
     xTaskCreatePinnedToCore(sequence_runner_task, "seq_run_task", 4096, NULL, 5, &s_seq_task_handle, 1);
@@ -603,7 +657,7 @@ bool servo_run_sequence_str(const char *steps_str, bool loop) {
 }
 
 bool servo_is_sequence_running(void) {
-    return s_seq_running;
+    return s_seq_running || (s_smooth_task_handle != NULL);
 }
 
 int servo_get_active_slot(void) {
