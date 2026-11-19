@@ -1,3 +1,4 @@
+
 #include "joystick.h"
 #include "servo_controller.h"
 #include "command_processor.h"
@@ -93,15 +94,20 @@ bool joystick_get_invert(void) {
 }
 
 void joystick_toggle_pose(void) {
+    int mn = 0, mx = 180;
+    servo_get_range(&mn, &mx);
+    int mid = (mn + mx) / 2;
     int cur = servo_get_angle();
-    int next = 90;
-    if (cur < 45) {
-        next = 90;
-    } else if (cur < 135) {
-        next = 180;
+    int next = mid;
+
+    if (cur < (mn + mid) / 2) {
+        next = mid;
+    } else if (cur < (mid + mx) / 2) {
+        next = mx;
     } else {
-        next = 0;
+        next = mn;
     }
+
     servo_move_smooth(next, 350);
     char msg[64];
     snprintf(msg, sizeof(msg), ">> [Joystick SW] Step to %d deg\n", next);
@@ -179,16 +185,19 @@ static void joystick_poll_task(void *pvParameters) {
             }
         }
 
-        // 3. Process Analog Motion only when an analog joystick is detected
+        // 3. Process Analog Motion within saved scissor lift bounds
         if (analog_present && mag > DEADZONE_NORM) {
+            int mn = SERVO_MIN_ANGLE, mx = SERVO_MAX_ANGLE;
+            servo_get_range(&mn, &mx);
+
             float eff_x = (mag - DEADZONE_NORM) / (1.0f - DEADZONE_NORM);
             if (nx < 0.0f) eff_x = -eff_x;
 
             float slew_per_tick = ((float)s_slew_deg_per_sec * (float)JOYSTICK_TICK_MS) / 1000.0f;
             servo_f += eff_x * slew_per_tick;
 
-            if (servo_f < (float)SERVO_MIN_ANGLE) servo_f = (float)SERVO_MIN_ANGLE;
-            if (servo_f > (float)SERVO_MAX_ANGLE) servo_f = (float)SERVO_MAX_ANGLE;
+            if (servo_f < (float)mn) servo_f = (float)mn;
+            if (servo_f > (float)mx) servo_f = (float)mx;
 
             servo_set_angle((int)lroundf(servo_f));
             pending_notify = true;
@@ -238,7 +247,6 @@ void joystick_init(void) {
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_VRX_CHANNEL, &config));
     ESP_ERROR_CHECK(adc_oneshot_config_channel(adc1_handle, ADC_VRY_CHANNEL, &config));
 
-    // Keep unconnected ADC pins pulled down so floating noise never triggers phantom motion
     gpio_pulldown_en(JOYSTICK_ADC_VRX_PIN);
     gpio_pulldown_en(JOYSTICK_ADC_VRY_PIN);
 

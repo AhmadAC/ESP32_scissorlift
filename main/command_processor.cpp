@@ -1,3 +1,4 @@
+
 #include "command_processor.h"
 #include "servo_controller.h"
 #include "joystick.h"
@@ -18,29 +19,36 @@ static bool parse_bool_arg(const char *s) {
     return (strcasecmp(s, "on") == 0 || strcmp(s, "1") == 0 || strcasecmp(s, "true") == 0);
 }
 
+static size_t format_status_line(char *buf, size_t len) {
+    int s1 = servo_get_angle();
+    int o1 = servo_get_offset();
+    int min_a = SERVO_MIN_ANGLE;
+    int max_a = SERVO_MAX_ANGLE;
+    servo_get_range(&min_a, &max_a);
+    bool en = servo_is_enabled();
+    bool inv = joystick_get_invert();
+    int brownout = (esp_reset_reason() == ESP_RST_BROWNOUT) ? 1 : 0;
+
+    int n = snprintf(buf, len,
+                     "STATUS:s1=%d,o1=%d,min=%d,max=%d,en1=%d,idle=%d,run=%d,act=%d,loop=%d,bo=%d,inv=%d\n",
+                     s1, o1, min_a, max_a, en ? 1 : 0,
+                     servo_get_auto_idle() ? 1 : 0,
+                     servo_is_sequence_running() ? 1 : 0,
+                     servo_get_active_slot(),
+                     servo_is_sequence_looping() ? 1 : 0,
+                     brownout,
+                     inv ? 1 : 0);
+    return (n > 0) ? (size_t)n : 0;
+}
+
 void command_processor_init(void) {
     ESP_LOGI(TAG, "Command Processor Initialized for MG996R on GPIO 1");
 }
 
 void command_notify_status(void) {
     if (!ble_server_is_connected()) return;
-
-    int s1 = servo_get_angle();
-    int o1 = servo_get_offset();
-    bool en = servo_is_enabled();
-    bool inv = joystick_get_invert();
-    int brownout = (esp_reset_reason() == ESP_RST_BROWNOUT) ? 1 : 0;
-
-    char status_str[160];
-    snprintf(status_str, sizeof(status_str),
-             "STATUS:s1=%d,o1=%d,en1=%d,idle=%d,run=%d,act=%d,loop=%d,bo=%d,inv=%d\n",
-             s1, o1, en ? 1 : 0,
-             servo_get_auto_idle() ? 1 : 0,
-             servo_is_sequence_running() ? 1 : 0,
-             servo_get_active_slot(),
-             servo_is_sequence_looping() ? 1 : 0,
-             brownout,
-             inv ? 1 : 0);
+    char status_str[192];
+    format_status_line(status_str, sizeof(status_str));
     ble_server_send_notify(status_str);
 }
 
@@ -106,20 +114,33 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         return;
     }
 
-    // Presets
+    // Presets (respect saved trim range)
     if (strcmp(p, "home") == 0 || strcmp(p, "center") == 0) {
-        servo_move_smooth(90, 450);
-        print_fn(">> Centering to 90 deg...\n");
+        int mn = 0, mx = 180;
+        servo_get_range(&mn, &mx);
+        int mid = (mn + mx) / 2;
+        servo_move_smooth(mid, 450);
+        char msg[48];
+        snprintf(msg, sizeof(msg), ">> Centering to %d deg...\n", mid);
+        print_fn(msg);
         return;
     }
     if (strcmp(p, "min") == 0) {
-        servo_move_smooth(0, 450);
-        print_fn(">> Moving to 0 deg...\n");
+        int mn = 0, mx = 180;
+        servo_get_range(&mn, &mx);
+        servo_move_smooth(mn, 450);
+        char msg[48];
+        snprintf(msg, sizeof(msg), ">> Moving to Min (%d deg)...\n", mn);
+        print_fn(msg);
         return;
     }
     if (strcmp(p, "max") == 0) {
-        servo_move_smooth(180, 450);
-        print_fn(">> Moving to 180 deg...\n");
+        int mn = 0, mx = 180;
+        servo_get_range(&mn, &mx);
+        servo_move_smooth(mx, 450);
+        char msg[48];
+        snprintf(msg, sizeof(msg), ">> Moving to Max (%d deg)...\n", mx);
+        print_fn(msg);
         return;
     }
 
@@ -187,6 +208,32 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         return;
     }
 
+    // Save Scissor Range Endpoints: "range_set <min> <max>"
+    if (strncmp(p, "range_set ", 10) == 0) {
+        int mn = 0, mx = 180;
+        if (sscanf(p + 10, "%d %d", &mn, &mx) == 2) {
+            servo_set_range(mn, mx);
+            servo_get_range(&mn, &mx);
+            char msg[32];
+            snprintf(msg, sizeof(msg), "RANGE:%d,%d\n", mn, mx);
+            print_fn(msg);
+            command_notify_status();
+        } else {
+            print_fn(">> Usage: range_set <min_0_179> <max_1_180>\n");
+        }
+        return;
+    }
+
+    // Get Scissor Range Endpoints: "range_get"
+    if (strcmp(p, "range_get") == 0) {
+        int mn = 0, mx = 180;
+        servo_get_range(&mn, &mx);
+        char msg[32];
+        snprintf(msg, sizeof(msg), "RANGE:%d,%d\n", mn, mx);
+        print_fn(msg);
+        return;
+    }
+
     // Live Trim Offset: "offset <-45..45>" or "offset s1 <-45..45>"
     if (strncmp(p, "offset ", 7) == 0) {
         const char *arg = p + 7;
@@ -210,10 +257,12 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
         return;
     }
 
-    // Get Trim Offset: "cal_get"
+    // Get Trim Offset + Range: "cal_get"
     if (strcmp(p, "cal_get") == 0) {
-        char msg[32];
-        snprintf(msg, sizeof(msg), "CAL:%d\n", servo_get_offset());
+        int mn = 0, mx = 180;
+        servo_get_range(&mn, &mx);
+        char msg[64];
+        snprintf(msg, sizeof(msg), "RANGE:%d,%d\nCAL:%d\n", mn, mx, servo_get_offset());
         print_fn(msg);
         return;
     }
@@ -307,21 +356,8 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
 
     // Status query
     if (strcmp(p, "status") == 0) {
-        int s1 = servo_get_angle();
-        int o1 = servo_get_offset();
-        bool en = servo_is_enabled();
-        bool inv = joystick_get_invert();
-        int brownout = (esp_reset_reason() == ESP_RST_BROWNOUT) ? 1 : 0;
-        char msg[160];
-        snprintf(msg, sizeof(msg),
-                 "STATUS:s1=%d,o1=%d,en1=%d,idle=%d,run=%d,act=%d,loop=%d,bo=%d,inv=%d\n",
-                 s1, o1, en ? 1 : 0,
-                 servo_get_auto_idle() ? 1 : 0,
-                 servo_is_sequence_running() ? 1 : 0,
-                 servo_get_active_slot(),
-                 servo_is_sequence_looping() ? 1 : 0,
-                 brownout,
-                 inv ? 1 : 0);
+        char msg[192];
+        format_status_line(msg, sizeof(msg));
         print_fn(msg);
         return;
     }
@@ -331,7 +367,8 @@ void command_process(const char *cmd_line, command_print_fn_t print_fn) {
                  "  s1 <0-180> / servo <0-180>           : Move servo to angle immediately\n"
                  "  move <0-180> [duration_ms]           : Smooth ease over duration\n"
                  "  nudge <+/-deg>                       : Adjust angle by delta\n"
-                 "  home / min / max                     : Preset angles (90, 0, 180)\n"
+                 "  home / min / max                     : Preset angles (saved range)\n"
+                 "  range_set <min> <max> / range_get    : Save or read scissor lift range\n"
                  "  detach / attach                      : Disable / Enable PWM\n"
                  "  autoidle <on|off>                    : Relax PWM 3s after motion\n"
                  "  offset <-45..45> / cal_set <offset>  : Adjust and save trim offset\n"

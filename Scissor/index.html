@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>ESP32-S3 MG996R Servo Control</title>
+  <title>ESP32-S3 MG996R Scissor Lift Control</title>
   <link rel="stylesheet" href="style.css">
 </head>
 
@@ -18,7 +18,7 @@
 
   <header style="padding-bottom:8px; border-bottom:1px solid rgba(255,255,255,0.1); display:flex; align-items:center; justify-content:space-between;">
     <div>
-      <h1 style="font-size:1.05rem; font-weight:700; letter-spacing:-0.02em;">MG996R Servo Control</h1>
+      <h1 style="font-size:1.05rem; font-weight:700; letter-spacing:-0.02em;">MG996R Scissor Lift Control</h1>
       <div style="display:flex; align-items:center; gap:6px; margin-top:2px;">
         <div id="status-dot" style="width:8px; height:8px; border-radius:9999px; background:#f43f5e; box-shadow:0 0 6px #f43f5e; transition:background 0.2s;"></div>
         <span id="status-text" style="font-size:11px; color:rgba(255,255,255,0.6);">Disconnected</span>
@@ -59,32 +59,43 @@
         <span id="action-run-badge" style="font-size:10px; padding:2px 8px; border-radius:9999px; background:rgba(255,255,255,0.08); color:rgba(255,255,255,0.5);">Idle</span>
       </div>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
-        <button type="button" class="touch-btn" onclick="homeServo()" style="padding:10px 6px; background:#0284c7; font-size:11px; flex-direction:row; gap:5px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
-          <span>Center (90°)</span>
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
+        <button type="button" class="touch-btn" onclick="moveToSavedMin()" style="padding:10px 6px; background:#0369a1; font-size:11px; flex-direction:row; gap:4px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="7 13 12 18 17 13"></polyline><line x1="5" y1="21" x2="19" y2="21"></line></svg>
+          <span id="quick-min-lbl">Min (0°)</span>
         </button>
+        <button type="button" class="touch-btn" onclick="homeServo()" style="padding:10px 6px; background:#0284c7; font-size:11px; flex-direction:row; gap:4px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>
+          <span id="quick-mid-lbl">Mid (90°)</span>
+        </button>
+        <button type="button" class="touch-btn" onclick="moveToSavedMax()" style="padding:10px 6px; background:#0369a1; font-size:11px; flex-direction:row; gap:4px;">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 11 12 6 7 11"></polyline><line x1="5" y1="3" x2="19" y2="3"></line></svg>
+          <span id="quick-max-lbl">Max (180°)</span>
+        </button>
+      </div>
+
+      <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:8px;">
         <button type="button" class="touch-btn" onclick="detachServo()" style="padding:10px 6px; background:#f59e0b; color:#000000; border-color:#f59e0b; font-size:11px; font-weight:700; flex-direction:row; gap:5px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
-          <span>Detach (Idle)</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.36 6.64a9 9 0 1 1-12.73 0"></path><line x1="12" y1="2" x2="12" y2="12"></line></svg>
+          <span>Detach</span>
         </button>
         <button type="button" class="touch-btn" onclick="requestStatusSync()" style="padding:10px 6px; background:#1e293b; font-size:11px; flex-direction:row; gap:5px;">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-          <span>Sync State</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          <span>Sync</span>
         </button>
         <button type="button" class="touch-btn" onclick="stopAllMotion()" style="padding:10px 6px; background:#ef4444; font-size:11px; flex-direction:row; gap:5px;">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"></rect></svg>
           <span>STOP</span>
         </button>
       </div>
 
-      <button id="joy-invert-btn" type="button" class="touch-btn" onclick="toggleJoystickInvert()" style="padding:10px 8px; background:#1e293b; border-color:#475569; color:rgba(255,255,255,0.8); font-size:11px; flex-direction:row; gap:6px;">
+      <button id="joy-invert-btn" type="button" class="touch-btn" onclick="toggleJoystickInvert()" style="padding:9px 8px; background:#1e293b; border-color:#475569; color:rgba(255,255,255,0.8); font-size:11px; flex-direction:row; gap:6px;">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"></polyline><path d="M3 11V9a4 4 0 0 1 4-4h14"></path><polyline points="7 23 3 19 7 15"></polyline><path d="M21 13v2a4 4 0 0 1-4 4H3"></path></svg>
         <span id="joy-invert-text">Joystick Invert: OFF</span>
       </button>
     </div>
 
-    <!-- MG996R Servo Slider Card -->
+    <!-- Scissor Lift Proportional Control -->
     <div class="glass-panel" style="border-radius:16px; padding:12px; display:flex; flex-direction:column; gap:10px; border-color:rgba(56,189,248,0.4);">
       <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:6px; gap:6px; flex-wrap:wrap;">
         <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#38bdf8; display:flex; align-items:center; gap:6px;">
@@ -93,39 +104,86 @@
             <line x1="12" y1="21" x2="12" y2="12"></line><line x1="12" y1="8" x2="12" y2="3"></line>
             <line x1="20" y1="21" x2="20" y2="16"></line><line x1="20" y1="12" x2="20" y2="3"></line>
           </svg>
-          MG996R Joint Control
+          Scissor Lift Slider
         </span>
         <div style="display:flex; align-items:center; gap:6px;">
           <button id="auto-idle-btn" type="button" onclick="toggleAutoIdle()" style="padding:4px 8px; border-radius:9999px; background:#1e293b; color:rgba(255,255,255,0.75); border:1px solid #475569; font-size:10px; font-weight:700; cursor:pointer;">
             Auto-Idle: OFF
           </button>
-          <button id="offset-mode-btn" type="button" onclick="toggleOffsetMode()" style="padding:4px 8px; border-radius:9999px; background:#1e293b; color:#f59e0b; border:1px solid #f59e0b; font-size:10px; font-weight:700; cursor:pointer;">
-            Trim: OFF
-          </button>
           <button type="button" onclick="requestCalibrationSync()" style="background:none; border:none; color:#38bdf8; font-size:10px; font-weight:600; cursor:pointer;">Fetch</button>
         </div>
       </div>
 
-      <!-- MG996R Control on GPIO 1 -->
+      <!-- Main Proportional Lift Slider (0% - 100% across saved [min, max] range) -->
       <div class="servo-card">
-        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; margin-bottom:6px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; margin-bottom:6px; gap:6px; flex-wrap:wrap;">
           <div style="display:flex; align-items:center; gap:6px;">
-            <span id="s1-header" onclick="editServoName()" style="cursor:pointer;">MG996R: <span id="s1-val" style="color:#38bdf8; font-family:monospace; font-weight:700;">90°</span></span>
+            <span id="s1-header" onclick="editServoName()" style="cursor:pointer;">MG996R: <span id="s1-val" style="color:#38bdf8; font-family:monospace; font-weight:700;">50% (90°)</span></span>
             <span class="pin-badge">GPIO 1</span>
             <span id="s1-state-badge" class="pin-badge" style="background:rgba(148,163,184,0.15); color:#94a3b8; border-color:rgba(148,163,184,0.3);">IDLE</span>
           </div>
-          <span style="font-size:10px; color:rgba(255,255,255,0.5);">Trim: <span id="o1-val" style="color:#f59e0b; font-family:monospace; font-weight:700;">0°</span></span>
+          <span id="saved-range-badge" style="font-size:10px; color:#34d399; font-family:monospace; font-weight:700;">Range: 0° – 180°</span>
         </div>
-        <input type="range" id="s1-slider" min="0" max="180" value="90" onpointerdown="onSliderStart()" ontouchstart="onSliderStart()" oninput="onServoSlider(this.value)" onchange="onSliderCommit(this.value)">
+        <input type="range" id="s1-slider" min="0" max="100" value="50" onpointerdown="onSliderStart()" ontouchstart="onSliderStart()" oninput="onServoSlider(this.value)" onchange="onSliderCommit(this.value)">
         <div class="servo-btn-row">
-          <button type="button" class="trim-btn" id="s1-btn-a" onclick="servoStepAction(-10, -1)">-10°</button>
-          <button type="button" class="trim-btn" id="s1-btn-b" onclick="servoStepAction(-1, 1)">-1°</button>
-          <button type="button" class="trim-btn" id="s1-btn-c" onclick="servoStepAction(1, -5)">+1°</button>
-          <button type="button" class="trim-btn" id="s1-btn-d" onclick="servoStepAction(10, 5)">+10°</button>
+          <button type="button" class="trim-btn" onclick="nudgeLiftPercent(-10)">-10%</button>
+          <button type="button" class="trim-btn" onclick="nudgeLiftPercent(-1)">-1%</button>
+          <button type="button" class="trim-btn" onclick="nudgeLiftPercent(1)">+1%</button>
+          <button type="button" class="trim-btn" onclick="nudgeLiftPercent(10)">+10%</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Easy End-Stop Trimming (Min End & Max End) -->
+    <div class="glass-panel" style="border-radius:16px; padding:12px; display:flex; flex-direction:column; gap:10px; border-color:rgba(245,158,11,0.45);">
+      <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:6px; gap:6px;">
+        <span style="font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:#f59e0b; display:flex; align-items:center; gap:6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="21" y1="4" x2="14" y2="4"></line><line x1="10" y1="4" x2="3" y2="4"></line>
+            <line x1="21" y1="12" x2="12" y2="12"></line><line x1="8" y1="12" x2="3" y2="12"></line>
+            <line x1="21" y1="20" x2="16" y2="20"></line><line x1="12" y1="20" x2="3" y2="20"></line>
+            <circle cx="12" cy="4" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="14" cy="20" r="2"></circle>
+          </svg>
+          End-Stop Trim (Both Ends)
+        </span>
+        <span id="trim-sync-badge" style="font-size:10px; padding:2px 8px; border-radius:9999px; background:rgba(16,185,129,0.18); color:#34d399; font-weight:700;">Saved</span>
+      </div>
+
+      <div style="font-size:10px; line-height:1.35; color:rgba(255,255,255,0.65);">
+        Adjust either end below — pressing any button updates the trim angle and moves the lift live. Tap <strong>Save Trim to Flash</strong> so the Lift Slider scales proportionally across your trimmed range.
+      </div>
+
+      <!-- Min End Trim -->
+      <div class="servo-card trim-end-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; margin-bottom:4px;">
+          <span style="font-weight:700; color:#fbbf24;">Min End (Bottom): <span id="min-trim-val" style="font-family:monospace; font-size:13px; color:#ffffff;">0°</span></span>
+          <button type="button" onclick="testTrimEnd('min')" style="background:#334155; color:#7dd3fc; border:1px solid #475569; border-radius:6px; padding:3px 8px; font-size:10px; font-weight:700; cursor:pointer;">Test Min</button>
+        </div>
+        <input type="range" id="min-trim-slider" class="offset-slider" min="0" max="179" value="0" oninput="onMinTrimSlider(this.value)">
+        <div class="servo-btn-row">
+          <button type="button" class="trim-btn" onclick="nudgeMinTrim(-10)">-10°</button>
+          <button type="button" class="trim-btn" onclick="nudgeMinTrim(-1)">-1°</button>
+          <button type="button" class="trim-btn" onclick="nudgeMinTrim(1)">+1°</button>
+          <button type="button" class="trim-btn" onclick="nudgeMinTrim(10)">+10°</button>
         </div>
       </div>
 
-      <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-top:2px;">
+      <!-- Max End Trim -->
+      <div class="servo-card trim-end-card">
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; margin-bottom:4px;">
+          <span style="font-weight:700; color:#fbbf24;">Max End (Top): <span id="max-trim-val" style="font-family:monospace; font-size:13px; color:#ffffff;">180°</span></span>
+          <button type="button" onclick="testTrimEnd('max')" style="background:#334155; color:#7dd3fc; border:1px solid #475569; border-radius:6px; padding:3px 8px; font-size:10px; font-weight:700; cursor:pointer;">Test Max</button>
+        </div>
+        <input type="range" id="max-trim-slider" class="offset-slider" min="1" max="180" value="180" oninput="onMaxTrimSlider(this.value)">
+        <div class="servo-btn-row">
+          <button type="button" class="trim-btn" onclick="nudgeMaxTrim(-10)">-10°</button>
+          <button type="button" class="trim-btn" onclick="nudgeMaxTrim(-1)">-1°</button>
+          <button type="button" class="trim-btn" onclick="nudgeMaxTrim(1)">+1°</button>
+          <button type="button" class="trim-btn" onclick="nudgeMaxTrim(10)">+10°</button>
+        </div>
+      </div>
+
+      <div style="display:grid; grid-template-columns:1.3fr 1fr; gap:6px; margin-top:2px;">
         <button id="save-cal-btn" type="button" class="touch-btn" onclick="saveCalibrationOffset()" style="padding:10px; border-radius:8px; background:#10b981; color:white; font-size:11px; font-weight:700; border:none; cursor:pointer; flex-direction:row; gap:6px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
@@ -133,13 +191,12 @@
           </svg>
           <span id="save-cal-text">Save Trim to Flash</span>
         </button>
-        <button type="button" class="touch-btn" onclick="homeServo()" style="padding:10px; border-radius:8px; background:#475569; color:white; font-size:11px; font-weight:700; border:none; cursor:pointer; flex-direction:row; gap:6px;">
+        <button type="button" class="touch-btn" onclick="resetRangeTrim()" style="padding:10px; border-radius:8px; background:#475569; color:white; font-size:11px; font-weight:700; border:none; cursor:pointer; flex-direction:row; gap:6px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <circle cx="12" cy="12" r="10"></circle>
-            <line x1="22" y1="12" x2="18" y2="12"></line>
-            <line x1="6" y1="12" x2="2" y2="12"></line>
+            <polyline points="1 4 1 10 7 10"></polyline>
+            <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
           </svg>
-          <span>Center (90°)</span>
+          <span>Reset 0°–180°</span>
         </button>
       </div>
     </div>
@@ -236,7 +293,7 @@
 
   <footer style="margin-top:8px;">
     <form onsubmit="handleSendCustom(event)" style="display:flex; gap:8px;">
-      <input type="text" id="cmd-input" placeholder="Command (e.g. s1 90, detach, home, status)..." style="flex:1; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:8px 12px; font-size:12px; color:white; outline:none;">
+      <input type="text" id="cmd-input" placeholder="Command (e.g. s1 90, range_set 20 160, home, status)..." style="flex:1; background:rgba(255,255,255,0.1); border:1px solid rgba(255,255,255,0.15); border-radius:12px; padding:8px 12px; font-size:12px; color:white; outline:none;">
       <button type="submit" class="touch-btn" style="padding:0 16px; border-radius:12px; background:#0284c7; color:white; font-size:12px; font-weight:600; border:none; cursor:pointer; flex-direction:row; gap:6px;">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
         <span>Send</span>

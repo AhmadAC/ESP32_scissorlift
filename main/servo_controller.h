@@ -43,10 +43,12 @@ bool servo_is_enabled(void);
 void servo_set_auto_idle(bool enabled);
 bool servo_get_auto_idle(void);
 
-// Calibration Trim Offsets
+// Calibration Trim Offsets & End-Stop Range
 void servo_set_offset(int offset);
 int  servo_get_offset(void);
 void servo_save_offset(int offset);
+void servo_set_range(int min_angle, int max_angle);
+void servo_get_range(int *min_angle, int *max_angle);
 
 // Programmable Sequence Routines
 bool servo_action_set(int slot, const char *def_str);

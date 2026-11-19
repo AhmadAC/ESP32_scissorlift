@@ -1,3 +1,4 @@
+
 #include "servo_controller.h"
 #include "ble_server.h"
 #include "driver/ledc.h"
@@ -44,6 +45,8 @@ static portMUX_TYPE s_servo_mux = portMUX_INITIALIZER_UNLOCKED;
 
 static int  s_angle = SERVO_DEFAULT_ANGLE;
 static int  s_offset = 0;
+static int  s_min_angle = SERVO_MIN_ANGLE;
+static int  s_max_angle = SERVO_MAX_ANGLE;
 static bool s_enabled = false;
 static bool s_auto_idle = false;
 static int64_t s_last_activity_us = 0;
@@ -111,9 +114,16 @@ static void notify_action_state(bool running, int slot, bool loop) {
 static void load_nvs_configuration(void) {
     nvs_handle_t h;
     if (nvs_open("servo_cal", NVS_READONLY, &h) == ESP_OK) {
-        int32_t off = 0, idle = 0;
+        int32_t off = 0, idle = 0, mn = SERVO_MIN_ANGLE, mx = SERVO_MAX_ANGLE;
         if (nvs_get_i32(h, "off_0", &off) == ESP_OK) s_offset = clamp_offset((int)off);
         if (nvs_get_i32(h, "auto_idle", &idle) == ESP_OK) s_auto_idle = (idle != 0);
+        if (nvs_get_i32(h, "min_ang", &mn) == ESP_OK && nvs_get_i32(h, "max_ang", &mx) == ESP_OK) {
+            if (mn >= SERVO_MIN_ANGLE && mx <= SERVO_MAX_ANGLE && mn < mx) {
+                s_min_angle = (int)mn;
+                s_max_angle = (int)mx;
+                s_angle = (s_min_angle + s_max_angle) / 2;
+            }
+        }
         nvs_close(h);
     }
 
@@ -316,13 +326,13 @@ void servo_controller_init(void) {
     ledc_ch.timer_sel  = LEDC_TIMER;
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_ch));
 
-    // Hold GPIO 1 LOW via LEDC idle state without overriding GPIO matrix routing
     ledc_stop(LEDC_MODE, LEDC_CHANNEL, 0);
 
     s_last_activity_us = esp_timer_get_time();
 
     xTaskCreatePinnedToCore(auto_idle_monitor_task, "auto_idle_task", 2048, NULL, 2, NULL, 1);
-    ESP_LOGI(TAG, "MG996R Servo controller initialized on GPIO %d (starts DETACHED).", (int)SERVO_1_PIN);
+    ESP_LOGI(TAG, "MG996R Servo initialized on GPIO %d (range=%d..%d, starts DETACHED).",
+             (int)SERVO_1_PIN, s_min_angle, s_max_angle);
 }
 
 void servo_set_angle(int angle) {
@@ -479,6 +489,36 @@ void servo_save_offset(int offset) {
         nvs_close(h);
         ESP_LOGI(TAG, "Trim offset saved to NVS: %d", offset);
     }
+}
+
+void servo_set_range(int min_angle, int max_angle) {
+    min_angle = clamp_angle(min_angle);
+    max_angle = clamp_angle(max_angle);
+    if (min_angle >= max_angle) {
+        if (min_angle >= SERVO_MAX_ANGLE) min_angle = SERVO_MAX_ANGLE - 1;
+        max_angle = min_angle + 1;
+    }
+
+    portENTER_CRITICAL(&s_servo_mux);
+    s_min_angle = min_angle;
+    s_max_angle = max_angle;
+    portEXIT_CRITICAL(&s_servo_mux);
+
+    nvs_handle_t h;
+    if (nvs_open("servo_cal", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_i32(h, "min_ang", (int32_t)min_angle);
+        nvs_set_i32(h, "max_ang", (int32_t)max_angle);
+        nvs_commit(h);
+        nvs_close(h);
+        ESP_LOGI(TAG, "Scissor range saved to NVS: %d..%d deg", min_angle, max_angle);
+    }
+}
+
+void servo_get_range(int *min_angle, int *max_angle) {
+    portENTER_CRITICAL(&s_servo_mux);
+    if (min_angle) *min_angle = s_min_angle;
+    if (max_angle) *max_angle = s_max_angle;
+    portEXIT_CRITICAL(&s_servo_mux);
 }
 
 bool servo_action_set(int slot, const char *def_str) {

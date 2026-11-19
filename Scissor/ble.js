@@ -463,9 +463,10 @@ function universalBleDecode(val) {
       }
       if (hexDecoded && (/^[\x20-\x7E\r\n\t]+$/.test(hexDecoded) ||
           hexDecoded.includes("STATUS:") || hexDecoded.includes("ANG:") ||
-          hexDecoded.includes("CAL:") || hexDecoded.includes("ACT:") ||
-          hexDecoded.includes("ACT_STATE:") || hexDecoded.includes("SERVO_EN:") ||
-          hexDecoded.includes("AUTO_IDLE:") || hexDecoded.includes(">>"))) {
+          hexDecoded.includes("CAL:") || hexDecoded.includes("RANGE:") ||
+          hexDecoded.includes("ACT:") || hexDecoded.includes("ACT_STATE:") ||
+          hexDecoded.includes("SERVO_EN:") || hexDecoded.includes("AUTO_IDLE:") ||
+          hexDecoded.includes(">>"))) {
         return hexDecoded;
       }
     }
@@ -474,9 +475,9 @@ function universalBleDecode(val) {
       const b64Decoded = atob(raw);
       if (b64Decoded && (/^[\x20-\x7E\r\n\t]+$/.test(b64Decoded) ||
           b64Decoded.includes("STATUS:") || b64Decoded.includes("ANG:") ||
-          b64Decoded.includes("CAL:") || b64Decoded.includes("ACT:") ||
-          b64Decoded.includes("ACT_STATE:") || b64Decoded.includes("SERVO_EN:") ||
-          b64Decoded.includes("AUTO_IDLE:"))) {
+          b64Decoded.includes("CAL:") || b64Decoded.includes("RANGE:") ||
+          b64Decoded.includes("ACT:") || b64Decoded.includes("ACT_STATE:") ||
+          b64Decoded.includes("SERVO_EN:") || b64Decoded.includes("AUTO_IDLE:"))) {
         return b64Decoded;
       }
     } catch (e) {}
@@ -537,6 +538,14 @@ function handleIncomingBleData(rawText, sourceTag = "BLE") {
       return;
     }
 
+    if (text.startsWith("RANGE:")) {
+      const vals = text.substring(6).split(",");
+      if (vals.length >= 2 && typeof applyReceivedRange === "function") {
+        applyReceivedRange(parseInt(vals[0], 10), parseInt(vals[1], 10));
+      }
+      return;
+    }
+
     if (text.startsWith("CAL:")) {
       const val = parseInt(text.substring(4), 10);
       if (!isNaN(val) && typeof applyReceivedOffset === "function") {
@@ -569,6 +578,8 @@ function handleIncomingBleData(rawText, sourceTag = "BLE") {
     if (text.startsWith("STATUS:")) {
       const ms1 = text.match(/s1=(\d+)/);
       const mo1 = text.match(/o1=(-?\d+)/);
+      const mMin = text.match(/min=(\d+)/);
+      const mMax = text.match(/max=(\d+)/);
       const me1 = text.match(/en1=(\d+)/);
       const mIdle = text.match(/idle=(\d+)/);
       const mRun = text.match(/run=(\d+)/);
@@ -583,6 +594,9 @@ function handleIncomingBleData(rawText, sourceTag = "BLE") {
         showToast("Warning: Voltage sag caused brownout reset!", "warn");
       }
 
+      if (mMin && mMax && typeof applyReceivedRange === "function") {
+        applyReceivedRange(parseInt(mMin[1], 10), parseInt(mMax[1], 10));
+      }
       if (ms1 && typeof applyReceivedAngle === "function") {
         applyReceivedAngle(parseInt(ms1[1], 10), true);
       }

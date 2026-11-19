@@ -1,15 +1,18 @@
 let servoAngle = 90;
-let servoOffset = 0;
+let savedMinAngle = 0;
+let savedMaxAngle = 180;
+let draftMinAngle = 0;
+let draftMaxAngle = 180;
+let liftPercent = 50;
+
 let servoEnabled = false;
 let autoIdleEnabled = false;
 let joyInvertEnabled = false;
 let servoName = "MG996R";
-let isOffsetMode = false;
 
 let isDraggingSlider = false;
 let lastSliderEditMs = 0;
 let pendingServoCmd = null;
-let pendingCmdKind = null;
 let servoThrottleTimer = null;
 
 function initServoStorage() {
@@ -18,17 +21,36 @@ function initServoStorage() {
     if (storedName && storedName.trim().length > 0) {
       servoName = storedName.trim().substring(0, 28);
     }
-    const storedOffset = localStorage.getItem("mg996r_servo_offset");
-    if (storedOffset !== null) {
-      const parsed = parseInt(storedOffset, 10);
-      if (!isNaN(parsed)) {
-        servoOffset = Math.max(-45, Math.min(45, parsed));
+    const storedRange = localStorage.getItem("mg996r_servo_range");
+    if (storedRange) {
+      const parsed = JSON.parse(storedRange);
+      if (parsed && typeof parsed.min === "number" && typeof parsed.max === "number") {
+        const mn = Math.max(0, Math.min(179, Math.round(parsed.min)));
+        const mx = Math.max(mn + 1, Math.min(180, Math.round(parsed.max)));
+        savedMinAngle = mn;
+        savedMaxAngle = mx;
+        draftMinAngle = mn;
+        draftMaxAngle = mx;
       }
     }
   } catch (e) {}
+
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
   applyAutoIdleState(autoIdleEnabled);
   applyJoystickInvertState(joyInvertEnabled);
   updateServoUI();
+}
+
+function percentToAngle(pct, minA, maxA) {
+  const clampedPct = Math.max(0, Math.min(100, pct));
+  const span = Math.max(1, maxA - minA);
+  return Math.round(minA + (clampedPct / 100) * span);
+}
+
+function angleToPercent(angle, minA, maxA) {
+  const span = Math.max(1, maxA - minA);
+  const pct = Math.round(((angle - minA) / span) * 100);
+  return Math.max(0, Math.min(100, pct));
 }
 
 function updateServoStateBadge() {
@@ -47,48 +69,54 @@ function updateServoStateBadge() {
   }
 }
 
-function updateServoUI() {
-  const offEl = document.getElementById("o1-val");
-  if (offEl) offEl.innerText = `${servoOffset > 0 ? "+" : ""}${servoOffset}°`;
+function updateTrimDirtyIndicator() {
+  const badge = document.getElementById("trim-sync-badge");
+  if (!badge) return;
+  const dirty = (draftMinAngle !== savedMinAngle) || (draftMaxAngle !== savedMaxAngle);
+  if (dirty) {
+    badge.innerText = "Unsaved";
+    badge.style.background = "rgba(245,158,11,0.22)";
+    badge.style.color = "#fbbf24";
+  } else {
+    badge.innerText = "Saved";
+    badge.style.background = "rgba(16,185,129,0.18)";
+    badge.style.color = "#34d399";
+  }
+}
 
+function updateServoUI() {
   const sl = document.getElementById("s1-slider");
   const hdr = document.getElementById("s1-header");
+  const rangeBadge = document.getElementById("saved-range-badge");
 
-  const btnA = document.getElementById("s1-btn-a");
-  const btnB = document.getElementById("s1-btn-b");
-  const btnC = document.getElementById("s1-btn-c");
-  const btnD = document.getElementById("s1-btn-d");
-
-  if (isOffsetMode) {
-    if (sl) {
-      sl.classList.add("offset-slider");
-      sl.min = "-45";
-      sl.max = "45";
-      sl.value = servoOffset;
-    }
-    if (hdr) {
-      hdr.innerHTML = `${escapeHtml(servoName)} Trim: <span id="s1-val" style="color:#f59e0b; font-family:monospace; font-weight:700;">${servoOffset > 0 ? "+" : ""}${servoOffset}°</span>`;
-    }
-    if (btnA) btnA.innerText = "-1 Trim";
-    if (btnB) btnB.innerText = "+1 Trim";
-    if (btnC) btnC.innerText = "-5°";
-    if (btnD) btnD.innerText = "+5°";
-  } else {
-    if (sl) {
-      sl.classList.remove("offset-slider");
-      sl.min = "0";
-      sl.max = "180";
-      sl.value = servoAngle;
-    }
-    if (hdr) {
-      hdr.innerHTML = `${escapeHtml(servoName)}: <span id="s1-val" style="color:#38bdf8; font-family:monospace; font-weight:700;">${servoAngle}°</span>`;
-    }
-    if (btnA) btnA.innerText = "-10°";
-    if (btnB) btnB.innerText = "-1°";
-    if (btnC) btnC.innerText = "+1°";
-    if (btnD) btnD.innerText = "+10°";
+  if (sl) sl.value = liftPercent;
+  if (hdr) {
+    hdr.innerHTML = `${escapeHtml(servoName)}: <span id="s1-val" style="color:#38bdf8; font-family:monospace; font-weight:700;">${liftPercent}% (${servoAngle}°)</span>`;
   }
+  if (rangeBadge) {
+    rangeBadge.innerText = `Range: ${savedMinAngle}° – ${savedMaxAngle}°`;
+  }
+
+  const qMin = document.getElementById("quick-min-lbl");
+  const qMid = document.getElementById("quick-mid-lbl");
+  const qMax = document.getElementById("quick-max-lbl");
+  const midAngle = Math.round((savedMinAngle + savedMaxAngle) / 2);
+  if (qMin) qMin.innerText = `Min (${savedMinAngle}°)`;
+  if (qMid) qMid.innerText = `Mid (${midAngle}°)`;
+  if (qMax) qMax.innerText = `Max (${savedMaxAngle}°)`;
+
+  const minValEl = document.getElementById("min-trim-val");
+  const maxValEl = document.getElementById("max-trim-val");
+  const minSl = document.getElementById("min-trim-slider");
+  const maxSl = document.getElementById("max-trim-slider");
+
+  if (minValEl) minValEl.innerText = `${draftMinAngle}°`;
+  if (maxValEl) maxValEl.innerText = `${draftMaxAngle}°`;
+  if (minSl) minSl.value = draftMinAngle;
+  if (maxSl) maxSl.value = draftMaxAngle;
+
   updateServoStateBadge();
+  updateTrimDirtyIndicator();
 }
 
 function editServoName() {
@@ -98,25 +126,6 @@ function editServoName() {
     try { localStorage.setItem("mg996r_servo_name", servoName); } catch (e) {}
     updateServoUI();
   }
-}
-
-function toggleOffsetMode() {
-  isOffsetMode = !isOffsetMode;
-  const btn = document.getElementById("offset-mode-btn");
-  if (btn) {
-    if (isOffsetMode) {
-      btn.innerText = "Trim: ON";
-      btn.style.background = "#f59e0b";
-      btn.style.color = "#000000";
-      showToast("Calibration Trim Mode Active", "warn");
-    } else {
-      btn.innerText = "Trim: OFF";
-      btn.style.background = "#1e293b";
-      btn.style.color = "#f59e0b";
-      showToast("Servo Angle Mode Active", "info");
-    }
-  }
-  updateServoUI();
 }
 
 function toggleAutoIdle() {
@@ -168,116 +177,144 @@ function applyJoystickInvertState(enabled) {
   }
 }
 
-function onSliderStart() {
-  isDraggingSlider = true;
-  lastSliderEditMs = Date.now();
-}
-
-function onServoSlider(val) {
-  const parsed = parseInt(val, 10);
-  if (isNaN(parsed)) return;
-
-  lastSliderEditMs = Date.now();
-  servoEnabled = true;
-  updateServoStateBadge();
-
-  if (isOffsetMode) {
-    servoOffset = Math.max(-45, Math.min(45, parsed));
-    const offEl = document.getElementById("o1-val");
-    if (offEl) offEl.innerText = `${servoOffset > 0 ? "+" : ""}${servoOffset}°`;
-    const valEl = document.getElementById("s1-val");
-    if (valEl) valEl.innerText = `${servoOffset > 0 ? "+" : ""}${servoOffset}°`;
-    pendingCmdKind = "offset";
-    pendingServoCmd = `offset ${servoOffset}`;
-    try { localStorage.setItem("mg996r_servo_offset", String(servoOffset)); } catch (e) {}
-  } else {
-    servoAngle = Math.max(0, Math.min(180, parsed));
-    const valEl = document.getElementById("s1-val");
-    if (valEl) valEl.innerText = `${servoAngle}°`;
-    pendingCmdKind = "angle";
-    pendingServoCmd = `s1 ${servoAngle}`;
-  }
-
+function queueThrottledAngle(angle) {
+  pendingServoCmd = `s1 ${angle}`;
   if (!servoThrottleTimer) {
     servoThrottleTimer = setTimeout(() => {
       servoThrottleTimer = null;
       const cmd = pendingServoCmd;
       pendingServoCmd = null;
-      pendingCmdKind = null;
       if (cmd) sendCommand(cmd);
     }, 80);
   }
 }
 
-function onSliderCommit(val) {
+function onSliderStart() {
+  isDraggingSlider = true;
+  lastSliderEditMs = Date.now();
+}
+
+function onServoSlider(pctVal) {
+  const parsedPct = parseInt(pctVal, 10);
+  if (isNaN(parsedPct)) return;
+
+  lastSliderEditMs = Date.now();
+  servoEnabled = true;
+  liftPercent = Math.max(0, Math.min(100, parsedPct));
+  servoAngle = percentToAngle(liftPercent, savedMinAngle, savedMaxAngle);
+
+  const valEl = document.getElementById("s1-val");
+  if (valEl) valEl.innerText = `${liftPercent}% (${servoAngle}°)`;
+  updateServoStateBadge();
+  queueThrottledAngle(servoAngle);
+}
+
+function onSliderCommit(pctVal) {
   isDraggingSlider = false;
   lastSliderEditMs = Date.now();
-  const parsed = parseInt(val, 10);
-  if (isNaN(parsed)) return;
+  const parsedPct = parseInt(pctVal, 10);
+  if (isNaN(parsedPct)) return;
 
   pendingServoCmd = null;
-  pendingCmdKind = null;
+  liftPercent = Math.max(0, Math.min(100, parsedPct));
+  servoAngle = percentToAngle(liftPercent, savedMinAngle, savedMaxAngle);
 
-  if (isOffsetMode) {
-    servoOffset = Math.max(-45, Math.min(45, parsed));
-    sendCommand(`offset ${servoOffset}`);
-    try { localStorage.setItem("mg996r_servo_offset", String(servoOffset)); } catch (e) {}
-  } else {
-    servoAngle = Math.max(0, Math.min(180, parsed));
-    sendCommand(`s1 ${servoAngle}`);
-  }
+  const valEl = document.getElementById("s1-val");
+  if (valEl) valEl.innerText = `${liftPercent}% (${servoAngle}°)`;
+  sendCommand(`s1 ${servoAngle}`);
 }
 
-function servoStepAction(normalDelta, trimDelta) {
-  if (isOffsetMode) {
-    if (trimDelta === -1 || trimDelta === 1) {
-      adjustOffset(trimDelta);
-    } else {
-      nudgeServo(trimDelta);
-    }
-  } else {
-    nudgeServo(normalDelta);
-  }
-}
-
-function nudgeServo(delta) {
+function nudgeLiftPercent(deltaPct) {
   lastSliderEditMs = Date.now();
-  let next = (servoAngle || 0) + delta;
-  if (next < 0) next = 0;
-  if (next > 180) next = 180;
+  liftPercent = Math.max(0, Math.min(100, liftPercent + deltaPct));
+  servoAngle = percentToAngle(liftPercent, savedMinAngle, savedMaxAngle);
+  servoEnabled = true;
+  updateServoUI();
+  sendCommand(`s1 ${servoAngle}`);
+}
+
+function nudgeServo(deltaAngle) {
+  lastSliderEditMs = Date.now();
+  let next = servoAngle + deltaAngle;
+  if (next < savedMinAngle) next = savedMinAngle;
+  if (next > savedMaxAngle) next = savedMaxAngle;
   servoAngle = next;
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
   servoEnabled = true;
-  updateServoStateBadge();
-
-  if (!isOffsetMode) {
-    const sl = document.getElementById("s1-slider");
-    if (sl) sl.value = next;
-    const valEl = document.getElementById("s1-val");
-    if (valEl) valEl.innerText = `${next}°`;
-  }
-  sendCommand(`s1 ${next}`);
+  updateServoUI();
+  sendCommand(`s1 ${servoAngle}`);
 }
 
-function adjustOffset(delta) {
-  lastSliderEditMs = Date.now();
-  let next = (servoOffset || 0) + delta;
-  if (next < -45) next = -45;
-  if (next > 45) next = 45;
-  servoOffset = next;
-  servoEnabled = true;
-  updateServoStateBadge();
+function onMinTrimSlider(val) {
+  const parsed = parseInt(val, 10);
+  if (isNaN(parsed)) return;
+  setMinTrimAngle(parsed, true);
+}
 
-  const offEl = document.getElementById("o1-val");
-  if (offEl) offEl.innerText = `${next > 0 ? "+" : ""}${next}°`;
-  if (isOffsetMode) {
-    const sl = document.getElementById("s1-slider");
-    if (sl) sl.value = next;
-    const valEl = document.getElementById("s1-val");
-    if (valEl) valEl.innerText = `${next > 0 ? "+" : ""}${next}°`;
+function nudgeMinTrim(delta) {
+  setMinTrimAngle(draftMinAngle + delta, false);
+}
+
+function setMinTrimAngle(target, throttled) {
+  lastSliderEditMs = Date.now();
+  let next = Math.max(0, Math.min(179, target));
+  if (next >= draftMaxAngle) {
+    next = draftMaxAngle - 1;
+    showToast("Min End must stay below Max End", "warn");
   }
-  sendCommand(`offset ${next}`);
-  appendLog("Trim", `Offset -> ${next}°`);
-  try { localStorage.setItem("mg996r_servo_offset", String(servoOffset)); } catch (e) {}
+  draftMinAngle = next;
+  servoAngle = next;
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  servoEnabled = true;
+  updateServoUI();
+
+  if (throttled) {
+    queueThrottledAngle(next);
+  } else {
+    pendingServoCmd = null;
+    sendCommand(`s1 ${next}`);
+  }
+}
+
+function onMaxTrimSlider(val) {
+  const parsed = parseInt(val, 10);
+  if (isNaN(parsed)) return;
+  setMaxTrimAngle(parsed, true);
+}
+
+function nudgeMaxTrim(delta) {
+  setMaxTrimAngle(draftMaxAngle + delta, false);
+}
+
+function setMaxTrimAngle(target, throttled) {
+  lastSliderEditMs = Date.now();
+  let next = Math.max(1, Math.min(180, target));
+  if (next <= draftMinAngle) {
+    next = draftMinAngle + 1;
+    showToast("Max End must stay above Min End", "warn");
+  }
+  draftMaxAngle = next;
+  servoAngle = next;
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  servoEnabled = true;
+  updateServoUI();
+
+  if (throttled) {
+    queueThrottledAngle(next);
+  } else {
+    pendingServoCmd = null;
+    sendCommand(`s1 ${next}`);
+  }
+}
+
+function testTrimEnd(which) {
+  lastSliderEditMs = Date.now();
+  const target = (which === "min") ? draftMinAngle : draftMaxAngle;
+  servoAngle = target;
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  servoEnabled = true;
+  updateServoUI();
+  sendCommand(`move ${target} 350`);
 }
 
 async function saveCalibrationOffset() {
@@ -286,16 +323,19 @@ async function saveCalibrationOffset() {
   if (txt) txt.innerText = "Saving...";
   if (btn) btn.style.background = "#0284c7";
 
+  savedMinAngle = draftMinAngle;
+  savedMaxAngle = draftMaxAngle;
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+
   try {
-    localStorage.setItem("mg996r_servo_offset", String(servoOffset));
+    localStorage.setItem("mg996r_servo_range", JSON.stringify({ min: savedMinAngle, max: savedMaxAngle }));
   } catch (e) {}
 
-  await sendCommand(`cal_set ${servoOffset}`);
-  if (isOffsetMode) toggleOffsetMode();
-  else updateServoUI();
+  await sendCommand(`range_set ${savedMinAngle} ${savedMaxAngle}`);
+  updateServoUI();
 
-  appendLog("Calibration", `Saved Trim Offset to NVS: ${servoOffset}°`);
-  showToast("Trim offset saved to ESP32 Flash!", "success");
+  appendLog("Calibration", `Saved Trim Range to NVS Flash: ${savedMinAngle}° – ${savedMaxAngle}°`);
+  showToast(`Saved ${savedMinAngle}°–${savedMaxAngle}° to Flash! Slider updated.`, "success");
 
   if (txt) txt.innerText = "Saved to Flash";
   if (btn) btn.style.background = "#059669";
@@ -305,13 +345,48 @@ async function saveCalibrationOffset() {
   }, 1500);
 }
 
-function homeServo() {
-  servoAngle = 90;
+async function resetRangeTrim() {
+  draftMinAngle = 0;
+  draftMaxAngle = 180;
+  savedMinAngle = 0;
+  savedMaxAngle = 180;
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+
+  try {
+    localStorage.setItem("mg996r_servo_range", JSON.stringify({ min: 0, max: 180 }));
+  } catch (e) {}
+
+  await sendCommand("range_set 0 180");
+  updateServoUI();
+  appendLog("Calibration", "Reset Trim Range to 0° – 180°");
+  showToast("Trim range reset to 0°–180°", "info");
+}
+
+function moveToSavedMin() {
+  servoAngle = savedMinAngle;
+  liftPercent = 0;
   servoEnabled = true;
-  if (isOffsetMode) toggleOffsetMode();
-  else updateServoUI();
+  updateServoUI();
+  sendCommand("min");
+  showToast(`Moving to Min (${savedMinAngle}°)`, "info");
+}
+
+function homeServo() {
+  servoAngle = Math.round((savedMinAngle + savedMaxAngle) / 2);
+  liftPercent = 50;
+  servoEnabled = true;
+  updateServoUI();
   sendCommand("home");
-  showToast("Centering MG996R to 90°", "info");
+  showToast(`Centering to ${servoAngle}° (50%)`, "info");
+}
+
+function moveToSavedMax() {
+  servoAngle = savedMaxAngle;
+  liftPercent = 100;
+  servoEnabled = true;
+  updateServoUI();
+  sendCommand("max");
+  showToast(`Moving to Max (${savedMaxAngle}°)`, "info");
 }
 
 function detachServo() {
@@ -323,7 +398,7 @@ function detachServo() {
 
 function requestCalibrationSync() {
   sendCommand("cal_get");
-  showToast("Fetching trim offset...", "info");
+  showToast("Fetching saved trim range...", "info");
 }
 
 function requestStatusSync() {
@@ -338,20 +413,28 @@ function applyReceivedAngle(angle, forceSync = false) {
     return;
   }
   servoAngle = Math.max(0, Math.min(180, angle));
-  if (!isOffsetMode) {
-    const sl = document.getElementById("s1-slider");
-    if (sl) sl.value = servoAngle;
-    const lbl = document.getElementById("s1-val");
-    if (lbl) lbl.innerText = `${servoAngle}°`;
-  }
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  updateServoUI();
+}
+
+function applyReceivedRange(minA, maxA) {
+  if (isNaN(minA) || isNaN(maxA)) return;
+  const mn = Math.max(0, Math.min(179, minA));
+  const mx = Math.max(mn + 1, Math.min(180, maxA));
+  savedMinAngle = mn;
+  savedMaxAngle = mx;
+  draftMinAngle = mn;
+  draftMaxAngle = mx;
+  liftPercent = angleToPercent(servoAngle, savedMinAngle, savedMaxAngle);
+  try {
+    localStorage.setItem("mg996r_servo_range", JSON.stringify({ min: mn, max: mx }));
+  } catch (e) {}
+  updateServoUI();
 }
 
 function applyReceivedOffset(offset) {
   if (isNaN(offset)) return;
-  servoOffset = Math.max(-45, Math.min(45, offset));
-  const offEl = document.getElementById("o1-val");
-  if (offEl) offEl.innerText = `${servoOffset > 0 ? "+" : ""}${servoOffset}°`;
-  if (isOffsetMode) updateServoUI();
+  // Kept for compatibility with CAL:<offset> telemetry
 }
 
 function applyReceivedEnableState(enabled) {

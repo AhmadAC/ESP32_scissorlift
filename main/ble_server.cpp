@@ -1,3 +1,4 @@
+
 #include "ble_server.h"
 #include "servo_controller.h"
 #include "joystick.h"
@@ -146,14 +147,17 @@ static int gatt_svr_chr_access_tx(uint16_t conn_handle, uint16_t attr_handle,
     if (ctxt->op == BLE_GATT_ACCESS_OP_READ_CHR) {
         int s1 = servo_get_angle();
         int o1 = servo_get_offset();
+        int min_a = SERVO_MIN_ANGLE;
+        int max_a = SERVO_MAX_ANGLE;
+        servo_get_range(&min_a, &max_a);
         bool en = servo_is_enabled();
         bool inv = joystick_get_invert();
         int brownout = (esp_reset_reason() == ESP_RST_BROWNOUT) ? 1 : 0;
 
-        char buf[160];
+        char buf[192];
         snprintf(buf, sizeof(buf),
-                 "STATUS:s1=%d,o1=%d,en1=%d,idle=%d,run=%d,act=%d,loop=%d,bo=%d,inv=%d\n",
-                 s1, o1, en ? 1 : 0,
+                 "STATUS:s1=%d,o1=%d,min=%d,max=%d,en1=%d,idle=%d,run=%d,act=%d,loop=%d,bo=%d,inv=%d\n",
+                 s1, o1, min_a, max_a, en ? 1 : 0,
                  servo_get_auto_idle() ? 1 : 0,
                  servo_is_sequence_running() ? 1 : 0,
                  servo_get_active_slot(),
